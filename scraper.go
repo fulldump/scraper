@@ -1,11 +1,14 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/html"
@@ -13,11 +16,24 @@ import (
 
 type Scraper struct {
 	Pending   chan string // pending urls to scrap
-	Entries   map[string]*Entry
+	Indexed   int64
+	Entries   sync.Map
 	Whitelist map[string]bool
 }
 
 func (s *Scraper) Start() {
+	wg := sync.WaitGroup{}
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.worker()
+		}()
+	}
+	wg.Wait()
+}
+
+func (s *Scraper) worker() {
 	for entry := range s.Pending {
 		s.scrapOne(entry)
 	}
@@ -25,7 +41,7 @@ func (s *Scraper) Start() {
 
 func (s *Scraper) scrapOne(scrapUrl string) {
 
-	log.Println("Scraping:", scrapUrl)
+	// log.Println("Scraping:", scrapUrl)
 
 	refenceUrl, _ := url.Parse(scrapUrl)
 
@@ -37,13 +53,27 @@ func (s *Scraper) scrapOne(scrapUrl string) {
 	defer resp.Body.Close()
 
 	// todo: check status code
+	if resp.StatusCode == http.StatusInternalServerError {
+		newWhitelist := map[string]bool{}
+		for host := range s.Whitelist {
+			if refenceUrl.Host == host {
+				continue
+			}
+			newWhitelist[host] = true
+		}
+		s.Whitelist = newWhitelist
+	}
+	if resp.StatusCode != http.StatusOK {
+		fmt.Println("ERROR: status code", resp.StatusCode, scrapUrl)
+	}
 
 	// todo: check headers (content-type, content-length, etc)
 
 	urls := GetUrls(resp.Body)
-	s.Entries[scrapUrl] = &Entry{
+	s.Entries.Store(scrapUrl, &Entry{
 		When: time.Now(),
-	}
+	})
+	atomic.AddInt64(&s.Indexed, 1)
 
 	for _, uu := range urls {
 		relativeUrl, err := url.Parse(uu)
@@ -58,11 +88,11 @@ func (s *Scraper) scrapOne(scrapUrl string) {
 		}
 
 		u := absoluteUrl.String()
-		if _, exist := s.Entries[u]; exist {
+		if _, exist := s.Entries.Load(u); exist {
 			continue
 		}
 
-		s.Entries[u] = nil
+		s.Entries.Store(u, nil)
 		s.Pending <- u // add new url to scrap
 	}
 
@@ -71,7 +101,7 @@ func (s *Scraper) scrapOne(scrapUrl string) {
 func NewScraper() *Scraper {
 	return &Scraper{
 		Pending:   make(chan string, 100000),
-		Entries:   map[string]*Entry{},
+		Entries:   sync.Map{},
 		Whitelist: nil, // if nil, not whitelist is applied :D
 	}
 }

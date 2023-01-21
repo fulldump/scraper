@@ -8,7 +8,9 @@ import (
 func main() {
 
 	myScraper := NewScraper()
-	myScraper.Pending <- "https://es.wikipedia.org/wiki/Wikipedia:Portada" // like a seed :D
+	// myScraper.Pending <- "https://es.wikipedia.org/wiki/Wikipedia:Portada" // like a seed :D
+	myScraper.Pending <- "https://www.treeweb.es/" // like a seed :D
+	// myScraper.Pending <- "https://goose.blue/" // like a seed :D
 
 	myScraper.Whitelist = map[string]bool{
 		"www.treeweb.es":   true,
@@ -19,8 +21,8 @@ func main() {
 	go func() {
 		for {
 			fmt.Println("Pending:", len(myScraper.Pending))
-			fmt.Printf("Entries: %v\n", len(myScraper.Entries))
-			time.Sleep(3 * time.Second)
+			fmt.Println("Indexed:", myScraper.Indexed)
+			time.Sleep(1 * time.Second)
 		}
 	}()
 
